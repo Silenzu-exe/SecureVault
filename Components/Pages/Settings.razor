@@ -1,0 +1,134 @@
+@page "/settings"
+@rendermode InteractiveServer
+@inherits AuthorizedPageBase
+@inject AuthService AuthService
+@inject EncryptionService EncryptionService
+@using SecureVault.Services
+
+<PageTitle>Settings — SecureVault</PageTitle>
+
+<h3 class="mb-4">Settings</h3>
+
+<div class="sv-card">
+    <h5 class="mb-3">Change Master Password</h5>
+
+    <EditForm Model="_pwForm" OnValidSubmit="HandleChangePassword">
+        <div class="mb-3">
+            <label class="form-label">Current master password</label>
+            <InputText type="password" class="form-control" @bind-Value="_pwForm.Current" />
+        </div>
+        <div class="mb-3">
+            <label class="form-label">New master password</label>
+            <InputText type="password" class="form-control" @bind-Value="_pwForm.New" />
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Confirm new master password</label>
+            <InputText type="password" class="form-control" @bind-Value="_pwForm.Confirm" />
+        </div>
+
+        @if (!string.IsNullOrEmpty(_pwError))
+        {
+            <div class="alert alert-danger py-2">@_pwError</div>
+        }
+        @if (!string.IsNullOrEmpty(_pwSuccess))
+        {
+            <div class="alert alert-success py-2">@_pwSuccess</div>
+        }
+
+        <button type="submit" class="btn btn-primary" disabled="@_pwBusy">
+            @(_pwBusy ? "Changing..." : "Change Password")
+        </button>
+    </EditForm>
+</div>
+
+<div class="sv-card">
+    <h5 class="mb-3">Auto-Lock</h5>
+    <label class="form-label">Lock vault after inactivity (minutes)</label>
+    <input type="number" min="1" max="120" class="form-control" style="max-width:160px;"
+           value="@Session.InactivityTimeoutMinutes" @onchange="OnTimeoutChanged" />
+</div>
+
+<div class="sv-card">
+    <h5 class="mb-3">Session</h5>
+    <button class="btn btn-outline-light" @onclick="HandleLogout">Log out</button>
+</div>
+
+@code {
+    private readonly ChangePasswordForm _pwForm = new();
+    private string? _pwError;
+    private string? _pwSuccess;
+    private bool _pwBusy;
+
+    private async Task HandleChangePassword()
+    {
+        _pwError = null;
+        _pwSuccess = null;
+
+        if (_pwForm.New.Length < 8)
+        {
+            _pwError = "New master password must be at least 8 characters.";
+            return;
+        }
+
+        if (_pwForm.New != _pwForm.Confirm)
+        {
+            _pwError = "New passwords do not match.";
+            return;
+        }
+
+        if (Session.CurrentUser is null)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        _pwBusy = true;
+        try
+        {
+            await AuthService.ChangeMasterPasswordAsync(Session.CurrentUser.Id, _pwForm.Current, _pwForm.New);
+
+            // Refresh session with the new salt/hash/key — ChangeMasterPasswordAsync
+            // doesn't return the updated user, so re-authenticate to pick it up cleanly.
+            var refreshedUser = await AuthService.AuthenticateAsync(_pwForm.New);
+            if (refreshedUser is not null)
+            {
+                var newKey = EncryptionService.DeriveKey(_pwForm.New, refreshedUser.Salt);
+                Session.Login(refreshedUser, newKey);
+            }
+
+            _pwSuccess = "Master password changed successfully.";
+            _pwForm.Current = string.Empty;
+            _pwForm.New = string.Empty;
+            _pwForm.Confirm = string.Empty;
+        }
+        catch (InvalidOperationException ex)
+        {
+            _pwError = ex.Message;
+        }
+        finally
+        {
+            _pwBusy = false;
+        }
+    }
+
+    private void OnTimeoutChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var minutes))
+        {
+            Session.InactivityTimeoutMinutes = minutes;
+        }
+    }
+
+    private void HandleLogout()
+    {
+        Session.Logout();
+        Nav.NavigateTo("/login");
+    }
+
+    private class ChangePasswordForm
+    {
+        public string Current { get; set; } = string.Empty;
+        public string New { get; set; } = string.Empty;
+        public string Confirm { get; set; } = string.Empty;
+    }
+}

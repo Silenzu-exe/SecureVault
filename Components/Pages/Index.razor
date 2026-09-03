@@ -1,0 +1,22 @@
+@page "/"
+@rendermode InteractiveServer
+@inject AuthService AuthService
+@inject SessionService Session
+@inject NavigationManager Nav
+@using SecureVault.Services
+
+<PageTitle>SecureVault</PageTitle>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        if (Session.CurrentUser is not null)
+        {
+            Nav.NavigateTo(Session.IsLocked ? "/unlock" : "/home");
+            return;
+        }
+
+        var userExists = await AuthService.UserExistsAsync();
+        Nav.NavigateTo(userExists ? "/login" : "/setup");
+    }
+}

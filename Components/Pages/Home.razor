@@ -1,0 +1,208 @@
+@page "/home"
+@rendermode InteractiveServer
+@inherits AuthorizedPageBase
+@inject PasswordGeneratorService GeneratorService
+@inject IJSRuntime JS
+@using SecureVault.Services
+@inject ScrollTrackingService ScrollTracking
+@implements IAsyncDisposable
+<PageTitle>Home — SecureVault</PageTitle>
+
+<section class="sv-hero" id="hero">
+    <h1 class="sv-hero-title">Strong & Random Password Generator</h1>
+    <p class="sv-hero-sub">Generate strong passwords instantly and store them safely in your vault.</p>
+
+    <div class="sv-generator-card">
+        <div class="mb-3">
+            <label class="form-label">Length: @_length</label>
+            <input type="range" class="form-range" min="8" max="64" @bind="_length" @bind:event="oninput" @bind:after="Generate" />
+        </div>
+
+        <div class="mb-3 d-flex flex-wrap gap-3">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="lc" @bind="_useLowercase" @bind:after="Generate" />
+                <label class="form-check-label" for="lc">Lowercase</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="uc" @bind="_useUppercase" @bind:after="Generate" />
+                <label class="form-check-label" for="uc">Uppercase</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="dg" @bind="_useDigits" @bind:after="Generate" />
+                <label class="form-check-label" for="dg">Digits</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="sy" @bind="_useSymbols" @bind:after="Generate" />
+                <label class="form-check-label" for="sy">Symbols</label>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <div class="alert alert-danger py-2">@_error</div>
+        }
+
+        @if (!string.IsNullOrEmpty(_generated))
+        {
+            <div class="sv-generated-box mb-3">
+                <div class="sv-pw-mono flex-grow-1">@_generated</div>
+                <button class="btn btn-sm btn-outline-light" @onclick="CopyToClipboard">
+                    @(_copied ? "Copied!" : "Copy")
+                </button>
+                <button class="btn btn-sm btn-primary" @onclick="Generate">🔄</button>
+            </div>
+
+            <div class="sv-strength-bar mb-2">
+                <div class="sv-strength-fill"
+                     style="width:@(CurrentStrength!.Score)%; background:var(--sv-@(CurrentStrength.Level <= StrengthLevel.Weak ? "danger" : CurrentStrength.Level == StrengthLevel.Fair ? "warning" : "success"));">
+                </div>
+            </div>
+            <div class="mb-3">
+                <span class="sv-badge sv-badge-@(CurrentStrength.Level.ToString().ToLowerInvariant())">@CurrentStrength.Level</span>
+                <span class="sv-entry-user ms-2">~@(Math.Round(CurrentStrength.EntropyBits)) bits of entropy</span>
+            </div>
+        }
+
+        <a href="/vault" class="btn btn-primary w-100">Save to Vault →</a>
+    </div>
+</section>
+
+<section id="about">
+    <section class="sv-feature-section">
+        <div class="sv-feature-text">
+            <h2>Why we need strong passwords</h2>
+            <p>
+                Weak, reused, or predictable passwords are one of the most common
+                causes of account breaches. A password that's long, random, and
+                unique for every account closes that gap - it simply can't be
+                guessed or cracked in any practical amount of time.
+            </p>
+        </div>
+        <div class="sv-feature-icon">🛡️</div>
+    </section>
+
+    <section class="sv-feature-section reverse">
+        <div class="sv-feature-text">
+            <h2>Why use a password vault?</h2>
+            <p>
+                Nobody can memorize dozens of unique, random passwords -
+                so people fall back on reuse, which is exactly what makes
+                breaches spread. A vault removes that trade-off: you remember
+                one master password, and it handles the rest.
+            </p>
+        </div>
+        <div class="sv-feature-icon">🗝️</div>
+    </section>
+
+    <section class="sv-feature-section">
+        <div class="sv-feature-text">
+            <h2>How password vaults generate passwords</h2>
+            <p>
+                A good generator draws from a cryptographically secure random
+                source - not a predictable algorithm - so the output can't be
+                guessed even if an attacker knows exactly how the generator
+                works. That's what SecureVault uses under the hood.
+            </p>
+        </div>
+        <div class="sv-feature-icon">🎲</div>
+    </section>
+
+    <section class="sv-feature-section reverse">
+        <div class="sv-feature-text">
+            <h2>Your vault keeps them safe</h2>
+            <p>
+                Generating a strong password is only half the job - you also need
+                somewhere secure to keep it. Every entry in your SecureVault vault
+                is encrypted with AES-256, unlocked only with your master password.
+            </p>
+        </div>
+        <div class="sv-feature-icon">🔐</div>
+    </section>
+</section>
+
+<div class="sv-cta-band">
+    <h2>Ready to save your passwords?</h2>
+    <p>Head to your vault to store and manage every credential securely.</p>
+    <a href="/vault" class="btn btn-primary">Go to Vault</a>
+</div>
+
+<script>
+    window.secureVaultScrollSpy = {
+        observer: null,
+        init: function (dotNetRef) {
+            if (this.observer) this.observer.disconnect();
+            const sections = document.querySelectorAll('#hero, #about');
+            this.observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        dotNetRef.invokeMethodAsync('OnSectionInView', entry.target.id);
+                    }
+                });
+            }, { rootMargin: '-50% 0px -50% 0px' });
+            sections.forEach(s => this.observer.observe(s));
+        }
+    };
+</script>
+
+@code {
+    private PasswordStrength? CurrentStrength =>
+        string.IsNullOrEmpty(_generated) ? null : GeneratorService.RatePasswordStrength(_generated);
+    private DotNetObjectReference<Home>? _dotNetRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("secureVaultScrollSpy.init", _dotNetRef);
+        }
+    }
+
+    [JSInvokable]
+    public void OnSectionInView(string sectionId)
+    {
+        ScrollTracking.SetActiveSection(sectionId);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _dotNetRef?.Dispose();
+    }
+    private int _length = 16;
+    private bool _useLowercase = true;
+    private bool _useUppercase = true;
+    private bool _useDigits = true;
+    private bool _useSymbols = true;
+    private string _generated = string.Empty;
+    private string? _error;
+    private bool _copied;
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        Generate();
+    }
+
+    private void Generate()
+    {
+        Session.RecordActivity();
+        _error = null;
+        _copied = false;
+
+        if (!_useLowercase && !_useUppercase && !_useDigits && !_useSymbols)
+        {
+            _error = "Select at least one character type.";
+            _generated = string.Empty;
+            return;
+        }
+
+        _generated = GeneratorService.GeneratePassword(_length, _useLowercase, _useUppercase, _useDigits, _useSymbols);
+    }
+
+    private async Task CopyToClipboard()
+    {
+        if (string.IsNullOrEmpty(_generated)) return;
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", _generated);
+        _copied = true;
+    }
+}

@@ -1,0 +1,42 @@
+﻿@using SecureVault.Services
+@inherits LayoutComponentBase
+@inject SessionService SessionService
+@implements IAsyncDisposable
+
+<PageTitle>SecureVault</PageTitle>
+
+<div class="page">
+    @if (SessionService.IsAuthenticated)
+    {
+        <NavMenu />
+        <main class="sv-main">
+            @Body
+        </main>
+        <footer class="sv-footer">
+            <div>🔒 SecureVault — your passwords, encrypted end to end.</div>
+            <div class="sv-footer-links">
+                <a href="/home">Home</a>
+                <a href="/home#about">About Us</a>
+                <a href="/vault">Vault</a>
+                <a href="/settings">Settings</a>
+            </div>
+        </footer>
+    }
+    else
+    {
+        @Body
+    }
+</div>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        SessionService.OnSessionChanged += StateHasChanged;
+        await Task.CompletedTask;
+    }
+
+    async ValueTask IAsyncDisposable.DisposeAsync()
+    {
+        SessionService.OnSessionChanged -= StateHasChanged;
+    }
+}

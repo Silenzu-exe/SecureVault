@@ -1,0 +1,56 @@
+﻿@using SecureVault.Services
+@using Microsoft.AspNetCore.Components.Routing
+@inject SessionService SessionService
+@inject ScrollTrackingService ScrollTracking
+@inject NavigationManager Nav
+@implements IDisposable
+
+<nav class="sv-navbar">
+    <a class="sv-navbar-brand" href="/home">🔒 SecureVault</a>
+
+    <div class="sv-navbar-links">
+        <a class="@($"sv-nav-link {(ScrollTracking.ActiveSection == "hero" ? "active" : "")}")" href="/home#hero">Home</a>
+        <a class="@($"sv-nav-link {(ScrollTracking.ActiveSection == "about" ? "active" : "")}")" href="/home#about">About Us</a>
+
+        <div class="sv-nav-dropdown">
+            <button class="@($"sv-nav-link {(FeaturesActive ? "active" : "")}")" @onclick="ToggleFeatures">Features ▾</button>
+            @if (featuresOpen)
+            {
+                <div class="sv-nav-dropdown-menu">
+                    <NavLink class="sv-dropdown-item" href="/vault" Match="NavLinkMatch.All" @onclick="CloseFeatures">🔓 Vault</NavLink>
+                    <NavLink class="sv-dropdown-item" href="/settings" Match="NavLinkMatch.All" @onclick="CloseFeatures">⚙️ Settings</NavLink>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="sv-navbar-actions">
+        <button class="sv-logout-btn" @onclick="OnLogout">⎋ Log out</button>
+    </div>
+</nav>
+
+@code {
+    private bool featuresOpen = false;
+    private bool FeaturesActive => Nav.Uri.EndsWith("/vault") || Nav.Uri.EndsWith("/settings");
+
+    protected override void OnInitialized()
+    {
+        ScrollTracking.OnSectionChanged += HandleSectionChanged;
+    }
+
+    private void HandleSectionChanged() => InvokeAsync(StateHasChanged);
+
+    private void ToggleFeatures() => featuresOpen = !featuresOpen;
+    private void CloseFeatures() => featuresOpen = false;
+
+    private void OnLogout()
+    {
+        SessionService.Logout();
+        Nav.NavigateTo("/", forceLoad: true);
+    }
+
+    public void Dispose()
+    {
+        ScrollTracking.OnSectionChanged -= HandleSectionChanged;
+    }
+}

@@ -1,0 +1,92 @@
+@page "/setup"
+@rendermode InteractiveServer
+@inject AuthService AuthService
+@inject EncryptionService EncryptionService
+@inject SessionService Session
+@inject NavigationManager Nav
+@using SecureVault.Services
+
+<PageTitle>Set up SecureVault</PageTitle>
+
+<div class="sv-auth-wrap">
+    <div class="sv-auth-card">
+        <div class="sv-auth-icon">🔒</div>
+        <div class="sv-auth-title">Welcome to SecureVault</div>
+        <div class="sv-auth-sub">Create your master password to get started.</div>
+
+        <EditForm Model="_model" OnValidSubmit="HandleSubmit">
+            <DataAnnotationsValidator />
+
+            <div class="mb-3">
+                <label class="form-label">Master password</label>
+                <InputText type="password" class="form-control" @bind-Value="_model.Password"
+                           @oninput="OnPasswordInput" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Confirm master password</label>
+                <InputText type="password" class="form-control" @bind-Value="_model.Confirm" />
+            </div>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-danger py-2">@_error</div>
+            }
+
+            <button type="submit" class="btn btn-primary w-100" disabled="@_busy">
+                @(_busy ? "Creating..." : "Create Vault")
+            </button>
+        </EditForm>
+
+        <div class="sv-auth-sub mt-3 mb-0" style="font-size:0.75rem;">
+            This password encrypts everything. There is no recovery if you forget it.
+        </div>
+    </div>
+</div>
+
+@code {
+    private readonly SetupModel _model = new();
+    private string? _error;
+    private bool _busy;
+
+    private void OnPasswordInput(ChangeEventArgs e)
+    {
+        _model.Password = e.Value?.ToString() ?? string.Empty;
+    }
+
+    private async Task HandleSubmit()
+    {
+        _error = null;
+
+        if (_model.Password.Length < 8)
+        {
+            _error = "Master password must be at least 8 characters.";
+            return;
+        }
+
+        if (_model.Password != _model.Confirm)
+        {
+            _error = "Passwords do not match.";
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var user = await AuthService.CreateUserAsync(_model.Password);
+            var key = EncryptionService.DeriveKey(_model.Password, user.Salt);
+            Session.Login(user, key);
+            Nav.NavigateTo("/vault");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private class SetupModel
+    {
+        public string Password { get; set; } = string.Empty;
+        public string Confirm { get; set; } = string.Empty;
+    }
+}

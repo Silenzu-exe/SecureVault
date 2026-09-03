@@ -1,0 +1,189 @@
+@page "/vault"
+@rendermode InteractiveServer
+@inherits AuthorizedPageBase
+@inject VaultService VaultService
+@inject PasswordGeneratorService GeneratorService
+@using SecureVault.Models
+@using SecureVault.Services
+
+<PageTitle>Vault — SecureVault</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h3 class="mb-0">Your Vault</h3>
+    <button class="btn btn-primary" @onclick="OpenAddModal">+ Add Entry</button>
+</div>
+
+@if (_entries is null)
+{
+    <p class="text-muted">Loading...</p>
+}
+else if (_entries.Count == 0)
+{
+    <div class="sv-card text-center text-muted">
+        No entries yet. Click "Add Entry" to save your first password.
+    </div>
+}
+else
+{
+    @foreach (var entry in _entries)
+    {
+        <div class="sv-entry-row">
+            <div class="flex-grow-1">
+                <div class="sv-entry-site">@entry.SiteName</div>
+                <div class="sv-entry-user">@entry.Username</div>
+            </div>
+
+            <div class="sv-pw-mono" style="min-width:160px;">
+                @if (_revealed.Contains(entry.Id))
+                {
+                    @VaultService.DecryptPassword(entry, Session.EncryptionKey!)
+                }
+                else
+                {
+                    <span>••••••••••••</span>
+                }
+            </div>
+
+            <button class="btn btn-sm btn-outline-light" @onclick="() => ToggleReveal(entry.Id)">
+                @(_revealed.Contains(entry.Id) ? "Hide" : "Reveal")
+            </button>
+            <button class="btn btn-sm btn-outline-light" @onclick="() => OpenEditModal(entry)">Edit</button>
+            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteEntry(entry.Id)">Delete</button>
+        </div>
+    }
+}
+
+@if (_showModal)
+{
+    <div class="modal d-block" tabindex="-1" style="background:rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(_editingId is null ? "Add Entry" : "Edit Entry")</h5>
+                    <button type="button" class="btn-close" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Site name</label>
+                        <input class="form-control" @bind="_form.SiteName" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Username</label>
+                        <input class="form-control" @bind="_form.Username" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Password</label>
+                        <div class="input-group">
+                            <input class="form-control" @bind="_form.Password" @bind:event="oninput" />
+                            <button class="btn btn-outline-light" type="button" @onclick="GenerateForForm">Generate</button>
+                        </div>
+                        @if (!string.IsNullOrEmpty(_form.Password))
+                        {
+                            var strength = GeneratorService.RatePasswordStrength(_form.Password);
+                            <div class="sv-strength-bar mt-2">
+                                <div class="sv-strength-fill" style="width:@(strength.Score)%; background:var(--sv-@(strength.Level <= StrengthLevel.Weak ? "danger" : strength.Level == StrengthLevel.Fair ? "warning" : "success"));"></div>
+                            </div>
+                            <span class="sv-badge sv-badge-@(strength.Level.ToString().ToLowerInvariant())">@strength.Level</span>
+                        }
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Notes (optional)</label>
+                        <textarea class="form-control" @bind="_form.Notes"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-light" @onclick="CloseModal">Cancel</button>
+                    <button class="btn btn-primary" @onclick="SaveEntry">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<VaultEntry>? _entries;
+    private readonly HashSet<Guid> _revealed = new();
+    private bool _showModal;
+    private Guid? _editingId;
+    private EntryForm _form = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        base.OnInitialized();
+        if (Session.CurrentUser is not null)
+        {
+            _entries = await VaultService.GetEntriesAsync(Session.CurrentUser.Id);
+        }
+    }
+
+    private void ToggleReveal(Guid id)
+    {
+        Session.RecordActivity();
+        if (!_revealed.Add(id)) _revealed.Remove(id);
+    }
+
+    private void OpenAddModal()
+    {
+        _editingId = null;
+        _form = new EntryForm();
+        _showModal = true;
+    }
+
+    private void OpenEditModal(VaultEntry entry)
+    {
+        _editingId = entry.Id;
+        _form = new EntryForm
+        {
+            SiteName = entry.SiteName,
+            Username = entry.Username,
+            Password = VaultService.DecryptPassword(entry, Session.EncryptionKey!),
+            Notes = entry.Notes
+        };
+        _showModal = true;
+    }
+
+    private void CloseModal() => _showModal = false;
+
+    private void GenerateForForm()
+    {
+        _form.Password = GeneratorService.GeneratePassword(16, true, true, true, true);
+    }
+
+    private async Task SaveEntry()
+    {
+        if (Session.CurrentUser is null) return;
+        Session.RecordActivity();
+
+        if (_editingId is null)
+        {
+            await VaultService.AddEntryAsync(
+                Session.CurrentUser.Id, _form.SiteName, _form.Username,
+                _form.Password, _form.Notes, Session.EncryptionKey!);
+        }
+        else
+        {
+            await VaultService.UpdateEntryAsync(
+                _editingId.Value, _form.SiteName, _form.Username,
+                _form.Password, _form.Notes, Session.EncryptionKey!);
+        }
+
+        _entries = await VaultService.GetEntriesAsync(Session.CurrentUser.Id);
+        _showModal = false;
+    }
+
+    private async Task DeleteEntry(Guid id)
+    {
+        if (Session.CurrentUser is null) return;
+        await VaultService.DeleteEntryAsync(id);
+        _entries = await VaultService.GetEntriesAsync(Session.CurrentUser.Id);
+        _revealed.Remove(id);
+    }
+
+    private class EntryForm
+    {
+        public string SiteName { get; set; } = string.Empty;
+        public string Username { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+        public string? Notes { get; set; }
+    }
+}
